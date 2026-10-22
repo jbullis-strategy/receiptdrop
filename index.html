@@ -59,6 +59,7 @@ button:disabled { opacity: .5; cursor: default; }
 .field span { font-size: 12px; color: var(--muted); }
 .field .req { font-weight: 600; color: var(--warn); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; margin-left: 4px; }
 input.missing { border-color: var(--bad); }
+.amount { display: grid; grid-template-columns: 1fr 4.2em; gap: 6px; }
 input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); width: 100%; min-width: 0; }
 input.mono { font-family: var(--mono); }
 .filename { font: 13px var(--mono); color: var(--muted); word-break: break-all; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
@@ -115,10 +116,9 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
     <h2>Details</h2>
     <div class="fields">
       <label class="field full"><span>Trip <b class="req">required</b></span><input id="fTrip" placeholder="Chicago-Oct" autocomplete="off" required></label>
+      <label class="field full"><span>Vendor and description</span><input id="fVendor" placeholder="Delta New York to London" autocomplete="off"></label>
       <label class="field"><span>Date</span><input id="fDate" type="date"></label>
-      <label class="field"><span>Amount</span><input id="fAmount" class="mono" inputmode="decimal" placeholder="42.80"></label>
-      <label class="field"><span>Vendor</span><input id="fVendor" placeholder="Hotel, airline, taxi…" autocomplete="off"></label>
-      <label class="field"><span>Currency</span><input id="fCurrency" class="mono" maxlength="3" placeholder="USD"></label>
+      <div class="field"><span>Amount</span><div class="amount"><input id="fAmount" class="mono" inputmode="decimal" placeholder="42.80" aria-label="Amount"><input id="fCurrency" class="mono" maxlength="3" placeholder="USD" aria-label="Currency"></div></div>
     </div>
   </section>
 
@@ -151,7 +151,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
     <h3>Settings</h3>
 
     <label class="field"><span>OneDrive folder (use {YYYY}, {MM}, {trip})</span><input id="sFolder" class="mono"></label>
-    <label class="field"><span>File name pattern ({date}, {vendor}, {amount}, {currency}, {trip})</span><input id="sName" class="mono"></label>
+    <label class="field"><span>File name pattern ({date}, {vendor} (vendor and description), {amount}, {currency}, {trip})</span><input id="sName" class="mono"></label>
     <label class="field"><span>Default scan look</span>
       <select id="sMode"><option value="doc">Document (clean black and white)</option><option value="color">Original color</option></select></label>
 
@@ -218,7 +218,7 @@ function toast(msg, ms = 3500) { const t = $('#toast'); t.textContent = msg; t.h
 function busy(on, text = 'Working…') { $('#busyText').textContent = text; $('#busy').hidden = !on; }
 const pad = n => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
-const slug = s => (s || '').trim().replace(/[\\/:*?"<>|#%]+/g, '').replace(/\s+/g, '-').slice(0, 60);
+const slug = s => (s || '').trim().replace(/[\\/:*?"<>|#%,;]+/g, '').replace(/[\s_-]+/g, '-').slice(0, 80).replace(/^-+|-+$/g, '');
 
 // ---------- pages ----------
 let pages = []; // { src: canvas, rot, mode, url, w, h }
