@@ -3,7 +3,7 @@
 A phone web app that scans receipts into PDFs and files them straight into a OneDrive folder.
 
 - **Scan:** opens your phone camera. Tap Scan again for each extra page. Each page can be rotated, removed, or switched between clean black-and-white and original color.
-- **Name:** files are named from the date, vendor, and amount, for example `2026-10-21_Hilton-Chicago_212.40USD.pdf`. They go into `Receipts/2026/10/` by default. You can change both patterns in Settings, and you can add `{trip}` to either.
+- **Name:** files are named from the date, vendor and description, and amount, for example `2026-10-21_Delta-New-York-to-London_612.40USD.pdf`. They go into `Receipts/2026/<trip>/` by default; a trip name is required for every receipt. You can change both patterns in Settings, and you can add `{trip}` to either.
 - **Save to OneDrive:** uploads directly through Microsoft's OneDrive API, so you don't need to email anything. If you're offline, for example on a plane, the receipt waits in the Outbox and uploads by itself when you reconnect.
 - **Email:** opens your phone's share sheet with the PDF attached, for the email-to-folder routine described below.
 
