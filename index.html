@@ -155,6 +155,8 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
 
     <details>
       <summary>Connect OneDrive (direct upload)</summary>
+      <p class="hint" id="builtInHint" style="margin-top:8px" hidden>Sign in with your Microsoft account. Receipts are saved to your own OneDrive, and only you can see them.</p>
+      <div id="ownApp">
       <ol>
         <li>Go to <a href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener">App registrations</a> and sign in with your Microsoft account. Choose <b>New registration</b>.</li>
         <li>Name it "Receipt Drop". Under supported account types, choose <b>Accounts in any organizational directory and personal Microsoft accounts</b>.</li>
@@ -162,6 +164,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
         <li>Copy the <b>Application (client) ID</b> into the box below and save.</li>
       </ol>
       <label class="field" style="margin-top:10px"><span>Application (client) ID</span><input id="sClient" class="mono" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off"></label>
+      </div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
         <button type="button" id="btnSignIn">Sign in to OneDrive</button>
         <button type="button" id="btnSignOut">Sign out</button>
@@ -198,9 +201,12 @@ const SCOPES = ['Files.ReadWrite', 'User.Read'];
 const REDIRECT = location.origin + location.pathname;
 
 // ---------- settings ----------
-const DEFAULTS = { folder: 'Receipts/{YYYY}/{MM}', name: '{date}_{vendor}_{amount}{currency}', mode: 'doc', clientId: '', email: '', tag: '#receipt', currency: 'USD' };
+// Paste your Application (client) ID here to share the app: everyone who opens it can then just sign in.
+const BUILT_IN_CLIENT_ID = 'a797d6d9-f225-4ba6-b9eb-a791905ff7b8';
+const DEFAULTS = { folder: 'Receipts/{YYYY}/{MM}', name: '{date}_{vendor}_{amount}{currency}', mode: 'doc', clientId: BUILT_IN_CLIENT_ID, email: '', tag: '#receipt', currency: 'USD' };
 let settings = { ...DEFAULTS };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('rd.settings') || '{}')); } catch {}
+if (BUILT_IN_CLIENT_ID) settings.clientId = BUILT_IN_CLIENT_ID;
 const saveSettings = () => { try { localStorage.setItem('rd.settings', JSON.stringify(settings)); } catch {} };
 
 // ---------- ui helpers ----------
@@ -444,7 +450,7 @@ function resetScan() {
 }
 
 $('#btnSave').onclick = async () => {
-  if (!settings.clientId || !signedIn()) { toast('Connect OneDrive first: open Settings, then "Connect OneDrive".', 5000); return openSettings(true); }
+  if (!settings.clientId || !signedIn()) { toast(BUILT_IN_CLIENT_ID ? 'Sign in to OneDrive first.' : 'Connect OneDrive first: open Settings, then "Connect OneDrive".', 5000); return openSettings(true); }
   let blob; try { blob = buildPdf(); } catch (e) { return toast(e.message); }
   await outboxPut({ blob, name: fileName(), folder: folderPath(), created: Date.now() });
   resetScan();
@@ -479,13 +485,14 @@ function openSettings(openOneDrive) {
   $('#sFolder').value = settings.folder; $('#sName').value = settings.name; $('#sMode').value = settings.mode;
   $('#sClient').value = settings.clientId; $('#sEmail').value = settings.email; $('#sTag').value = settings.tag;
   $('#redirectUri').textContent = REDIRECT;
+  $('#ownApp').hidden = !!BUILT_IN_CLIENT_ID; $('#builtInHint').hidden = !BUILT_IN_CLIENT_ID;
   if (openOneDrive === true) $('#settings details').open = true;
   $('#settings').showModal();
 }
 function readSettingsForm() {
   const prevClient = settings.clientId;
   Object.assign(settings, { folder: $('#sFolder').value.trim() || DEFAULTS.folder, name: $('#sName').value.trim() || DEFAULTS.name, mode: $('#sMode').value,
-    clientId: $('#sClient').value.trim(), email: $('#sEmail').value.trim(), tag: $('#sTag').value.trim() });
+    clientId: BUILT_IN_CLIENT_ID || $('#sClient').value.trim(), email: $('#sEmail').value.trim(), tag: $('#sTag').value.trim() });
   saveSettings(); updatePreview();
   return prevClient !== settings.clientId;
 }
