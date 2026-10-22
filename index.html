@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Receipt Drop</title>
+<meta name="theme-color" content="#1f3b3a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Receipts">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one phone-width column; scan tray on top, details, then sticky send bar. Thermal-paper neutrals, ink-teal accent. */
+:root {
+  --bg: #f3f4f1; --paper: #ffffff; --ink: #1c2321; --muted: #67716e; --line: #dde1dc;
+  --accent: #1f6f68; --accent-ink: #ffffff; --ok: #2e7d4f; --warn: #a3640b; --bad: #b3362f;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #121614; --paper: #1b201e; --ink: #e6ebe8; --muted: #93a09b; --line: #2c3431;
+    --accent: #5fbfb4; --accent-ink: #0d1f1d; --ok: #6cc28f; --warn: #e0a54a; --bad: #ef7a72; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans);
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.wrap { max-width: 560px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px; display: grid; gap: 18px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+.chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--paper); white-space: nowrap; }
+.chip.on { color: var(--ok); border-color: currentColor; }
+.chip.off { color: var(--warn); border-color: currentColor; }
+button, .btn { font: inherit; font-weight: 500; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 10px 14px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; }
+button:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+.icon-btn { padding: 8px 10px; }
+.capture { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+.capture label { border: 1.5px dashed var(--accent); color: var(--accent); background: var(--paper); border-radius: 12px; padding: 18px 12px; text-align: center; font-weight: 600; cursor: pointer; }
+.capture label.secondary { border-color: var(--line); color: var(--muted); font-weight: 500; }
+.capture input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.tray { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.tray:empty::before { content: "No pages yet. Scan the receipt; tap Scan again for each extra page."; color: var(--muted); font-size: 14px; padding: 6px 0; }
+.page { flex: 0 0 132px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: grid; }
+.page img { width: 100%; height: 170px; object-fit: contain; background: var(--bg); display: block; }
+.page .tools { display: flex; justify-content: space-between; border-top: 1px solid var(--line); }
+.page .tools button { border: 0; border-radius: 0; background: none; padding: 8px 0; flex: 1; font-size: 13px; color: var(--muted); }
+.page .num { font: 600 11px var(--mono); color: var(--muted); padding: 4px 8px 0; }
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fields .full { grid-column: 1 / -1; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field span { font-size: 12px; color: var(--muted); }
+input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); width: 100%; min-width: 0; }
+input.mono { font-family: var(--mono); }
+.filename { font: 13px var(--mono); color: var(--muted); word-break: break-all; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.filename b { color: var(--ink); font-weight: 600; }
+.sendbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--paper); border-top: 1px solid var(--line);
+  padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.sendbar .row { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: 1fr auto auto; gap: 8px; }
+.list { display: grid; gap: 6px; }
+.item { display: flex; gap: 10px; align-items: center; justify-content: space-between; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.item .name { font-family: var(--mono); min-width: 0; overflow-wrap: anywhere; }
+.item .meta { color: var(--muted); font-size: 12px; }
+.item .state { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.state.queued { color: var(--warn); } .state.failed { color: var(--bad); } .state.done { color: var(--ok); }
+.item a { color: var(--accent); }
+.empty { color: var(--muted); font-size: 14px; }
+dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--paper); color: var(--ink); width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 40px); padding: 0; }
+dialog::backdrop { background: rgb(0 0 0 / .45); }
+.dlg { padding: 18px; display: grid; gap: 14px; }
+.dlg h3 { margin: 0; font-size: 17px; }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+details { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+details ol { padding-left: 20px; margin: 8px 0 0; font-size: 13px; display: grid; gap: 4px; }
+code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(84px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; max-width: calc(100vw - 32px); z-index: 20; }
+.busy { position: fixed; inset: 0; background: rgb(0 0 0 / .35); display: grid; place-items: center; z-index: 30; color: #fff; font-weight: 600; }
+@media (max-width: 380px) { .fields { grid-template-columns: 1fr; } .sendbar .row { grid-template-columns: 1fr 1fr; } .sendbar .row .primary { grid-column: 1 / -1; } }
+@media (prefers-reduced-motion: no-preference) { button { transition: transform .08s; } button:active { transform: scale(.97); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Receipt Drop</h1>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="status" class="chip">…</span>
+      <button id="openSettings" class="icon-btn" aria-label="Settings">⚙︎</button>
+    </div>
+  </header>
+
+  <section>
+    <div class="capture">
+      <label for="cam">Scan receipt<input id="cam" type="file" accept="image/*" capture="environment"></label>
+      <label for="lib" class="secondary">From photos<input id="lib" type="file" accept="image/*" multiple></label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Pages <span id="pageCount"></span></h2>
+    <div id="tray" class="tray"></div>
+  </section>
+
+  <section>
+    <h2>Details</h2>
+    <div class="fields">
+      <label class="field"><span>Date</span><input id="fDate" type="date"></label>
+      <label class="field"><span>Amount</span><input id="fAmount" class="mono" inputmode="decimal" placeholder="42.80"></label>
+      <label class="field"><span>Vendor</span><input id="fVendor" placeholder="Hotel, airline, taxi…" autocomplete="off"></label>
+      <label class="field"><span>Currency</span><input id="fCurrency" class="mono" maxlength="3" placeholder="USD"></label>
+      <label class="field full"><span>Trip or project (optional, can be used in the folder path)</span><input id="fTrip" placeholder="Chicago-Oct" autocomplete="off"></label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Will be saved as</h2>
+    <div class="filename" id="preview"></div>
+  </section>
+
+  <section>
+    <h2>Outbox</h2>
+    <div id="outbox" class="list"></div>
+  </section>
+
+  <section>
+    <h2>Recently saved</h2>
+    <div id="recent" class="list"></div>
+  </section>
+</div>
+
+<div class="sendbar">
+  <div class="row">
+    <button id="btnSave" class="primary">Save to OneDrive</button>
+    <button id="btnEmail">Email</button>
+    <button id="btnDownload" aria-label="Download PDF">PDF ↓</button>
+  </div>
+</div>
+
+<dialog id="settings">
+  <form class="dlg" method="dialog" id="settingsForm">
+    <h3>Settings</h3>
+
+    <label class="field"><span>OneDrive folder (use {YYYY}, {MM}, {trip})</span><input id="sFolder" class="mono"></label>
+    <label class="field"><span>File name pattern ({date}, {vendor}, {amount}, {currency}, {trip})</span><input id="sName" class="mono"></label>
+    <label class="field"><span>Default scan look</span>
+      <select id="sMode"><option value="doc">Document (clean black and white)</option><option value="color">Original color</option></select></label>
+
+    <details>
+      <summary>Connect OneDrive (direct upload)</summary>
+      <ol>
+        <li>Go to <a href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener">App registrations</a> and sign in with your Microsoft account. Choose <b>New registration</b>.</li>
+        <li>Name it "Receipt Drop". Under supported account types, choose <b>Accounts in any organizational directory and personal Microsoft accounts</b>.</li>
+        <li>Redirect URI: platform <b>Single-page application (SPA)</b>, value:<br><code id="redirectUri"></code></li>
+        <li>Copy the <b>Application (client) ID</b> into the box below and save.</li>
+      </ol>
+      <label class="field" style="margin-top:10px"><span>Application (client) ID</span><input id="sClient" class="mono" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off"></label>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button type="button" id="btnSignIn">Sign in to OneDrive</button>
+        <button type="button" id="btnSignOut">Sign out</button>
+      </div>
+    </details>
+
+    <details>
+      <summary>Email-to-folder routine (optional)</summary>
+      <p class="hint" style="margin-top:8px">Use this if you'd rather email receipts. The Email button sends the PDF through your phone's share sheet, with the tag below in the subject. An automation then saves attachments from those emails into OneDrive.</p>
+      <label class="field" style="margin-top:8px"><span>Send-to address</span><input id="sEmail" type="email" placeholder="you@outlook.com"></label>
+      <label class="field" style="margin-top:8px"><span>Subject tag</span><input id="sTag" class="mono" placeholder="#receipt"></label>
+      <ol>
+        <li>In <a href="https://make.powerautomate.com" target="_blank" rel="noopener">Power Automate</a>, create an <b>Automated cloud flow</b>.</li>
+        <li>Trigger: <b>When a new email arrives (V3)</b>. Set Include Attachments = Yes, Only with Attachments = Yes, Subject Filter = your tag.</li>
+        <li>Add <b>Apply to each</b> on Attachments, then <b>OneDrive: Create file</b>. Folder = your receipts folder, File name = Attachments Name, File content = Attachments Content.</li>
+      </ol>
+    </details>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button value="cancel" formnovalidate>Close</button>
+      <button value="save" class="primary" id="btnSaveSettings">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+<div id="busy" class="busy" hidden><span id="busyText">Working…</span></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const SCOPES = ['Files.ReadWrite', 'User.Read'];
+const REDIRECT = location.origin + location.pathname;
+
+// ---------- settings ----------
+const DEFAULTS = { folder: 'Receipts/{YYYY}/{MM}', name: '{date}_{vendor}_{amount}{currency}', mode: 'doc', clientId: '', email: '', tag: '#receipt', currency: 'USD' };
+let settings = { ...DEFAULTS };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('rd.settings') || '{}')); } catch {}
+const saveSettings = () => { try { localStorage.setItem('rd.settings', JSON.stringify(settings)); } catch {} };
+
+// ---------- ui helpers ----------
+let toastTimer;
+function toast(msg, ms = 3500) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, ms); }
+function busy(on, text = 'Working…') { $('#busyText').textContent = text; $('#busy').hidden = !on; }
+const pad = n => String(n).padStart(2, '0');
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const slug = s => (s || '').trim().replace(/[\\/:*?"<>|#%]+/g, '').replace(/\s+/g, '-').slice(0, 60);
+
+// ---------- pages ----------
+let pages = []; // { src: canvas, rot, mode, url, w, h }
+const MAX_DIM = 2000;
+
+function loadImage(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Could not read that image.')); };
+    img.src = url;
+  });
+}
+
+async function addFiles(files) {
+  if (!files.length) return;
+  busy(true, 'Processing…');
+  try {
+    for (const f of files) {
+      const img = await loadImage(f); // browsers apply EXIF orientation automatically
+      const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const p = { src: c, rot: 0, mode: settings.mode };
+      render(p); pages.push(p);
+    }
+  } catch (e) { toast(e.message); }
+  busy(false); drawTray();
+}
+
+// Grayscale + auto-levels so paper goes white and ink goes dark.
+function enhance(ctx, w, h) {
+  const d = ctx.getImageData(0, 0, w, h), px = d.data, hist = new Uint32Array(256);
+  for (let i = 0; i < px.length; i += 4) { const g = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0; px[i] = g; hist[g]++; }
+  const total = w * h; let acc = 0, lo = 0, hi = 255;
+  for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc > total * 0.02) { lo = v; break; } }
+  acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc > total * 0.25) { hi = v; break; } }
+  if (hi - lo < 30) { lo = Math.max(0, hi - 30); }
+  const lut = new Uint8ClampedArray(256);
+  for (let v = 0; v < 256; v++) { const t = Math.min(1, Math.max(0, (v - lo) / (hi - lo))); lut[v] = 255 * Math.pow(t, 1.4); }
+  for (let i = 0; i < px.length; i += 4) { const g = lut[px[i]]; px[i] = px[i + 1] = px[i + 2] = g; }
+  ctx.putImageData(d, 0, 0);
+}
+
+function render(p) {
+  const s = p.src, turned = p.rot % 180 !== 0;
+  const c = document.createElement('canvas');
+  c.width = turned ? s.height : s.width; c.height = turned ? s.width : s.height;
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width / 2, c.height / 2); ctx.rotate(p.rot * Math.PI / 180); ctx.drawImage(s, -s.width / 2, -s.height / 2);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (p.mode === 'doc') enhance(ctx, c.width, c.height);
+  p.url = c.toDataURL('image/jpeg', p.mode === 'doc' ? 0.7 : 0.8); p.w = c.width; p.h = c.height;
+}
+
+function drawTray() {
+  const tray = $('#tray'); tray.innerHTML = '';
+  pages.forEach((p, i) => {
+    const el = document.createElement('div'); el.className = 'page';
+    el.innerHTML = `<div class="num">PAGE ${i + 1}</div><img alt="Page ${i + 1}"><div class="tools">
+      <button data-a="rot" aria-label="Rotate">↻</button><button data-a="mode">${p.mode === 'doc' ? 'B&W' : 'Color'}</button><button data-a="del" aria-label="Remove page">✕</button></div>`;
+    el.querySelector('img').src = p.url;
+    el.querySelector('.tools').onclick = e => {
+      const a = e.target.closest('button')?.dataset.a; if (!a) return;
+      if (a === 'del') pages.splice(i, 1);
+      if (a === 'rot') { p.rot = (p.rot + 90) % 360; render(p); }
+      if (a === 'mode') { p.mode = p.mode === 'doc' ? 'color' : 'doc'; render(p); }
+      drawTray();
+    };
+    tray.appendChild(el);
+  });
+  $('#pageCount').textContent = pages.length ? `· ${pages.length}` : '';
+}
+
+// ---------- naming ----------
+function meta() {
+  const date = $('#fDate').value || today();
+  return { date, vendor: slug($('#fVendor').value) || 'receipt', amount: ($('#fAmount').value || '').replace(/[^\d.,-]/g, ''),
+    currency: ($('#fCurrency').value || '').toUpperCase().replace(/[^A-Z]/g, ''), trip: slug($('#fTrip').value) };
+}
+function fill(tpl, m) {
+  const [Y, M] = m.date.split('-');
+  return tpl.replace(/\{YYYY\}/g, Y).replace(/\{MM\}/g, M).replace(/\{(\w+)\}/g, (_, k) => m[k] ?? '');
+}
+function fileName(m = meta()) {
+  let n = fill(settings.name, m).replace(/_+/g, '_').replace(/[_-]+$/, '').replace(/^[_-]+/, '');
+  return (n || 'receipt') + '.pdf';
+}
+function folderPath(m = meta()) {
+  return fill(settings.folder, m).split('/').map(s => s.trim()).filter(Boolean).join('/');
+}
+function updatePreview() { $('#preview').innerHTML = `${escapeHtml(folderPath())}/<b>${escapeHtml(fileName())}</b>`; }
+const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---------- pdf ----------
+function buildPdf() {
+  if (!pages.length) throw new Error('Scan at least one page first.');
+  const { jsPDF } = window.jspdf; let doc;
+  pages.forEach((p, i) => {
+    const W = 612, H = Math.round(W * p.h / p.w), o = H >= W ? 'p' : 'l';
+    if (i === 0) doc = new jsPDF({ unit: 'pt', format: [W, H], orientation: o, compress: true });
+    else doc.addPage([W, H], o);
+    doc.addImage(p.url, 'JPEG', 0, 0, W, H, undefined, 'FAST');
+  });
+  const m = meta();
+  doc.setProperties({ title: fileName(m).replace(/\.pdf$/, ''), subject: `Receipt ${m.vendor} ${m.amount}${m.currency}`, creator: 'Receipt Drop' });
+  return doc.output('blob');
+}
+
+// ---------- outbox (IndexedDB) ----------
+let dbp;
+function db() {
+  return dbp ||= new Promise((res, rej) => {
+    const r = indexedDB.open('receipt-drop', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function tx(mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => { const t = d.transaction('outbox', mode), s = t.objectStore('outbox'); const r = fn(s); t.oncomplete = () => res(r?.result); t.onerror = () => rej(t.error); });
+}
+const outboxAll = () => tx('readonly', s => s.getAll());
+const outboxPut = item => tx('readwrite', s => s.put(item));
+const outboxDel = id => tx('readwrite', s => s.delete(id));
+
+let recent = [];
+try { recent = JSON.parse(localStorage.getItem('rd.recent') || '[]'); } catch {}
+function addRecent(r) { recent.unshift(r); recent = recent.slice(0, 15); try { localStorage.setItem('rd.recent', JSON.stringify(recent)); } catch {} }
+
+async function drawLists() {
+  const items = await outboxAll().catch(() => []);
+  $('#outbox').innerHTML = items.length ? '' : '<div class="empty">Nothing waiting. Receipts saved while offline wait here and upload automatically.</div>';
+  for (const it of items) {
+    const el = document.createElement('div'); el.className = 'item';
+    const st = it.error ? 'failed' : 'queued';
+    el.innerHTML = `<div style="min-width:0"><div class="name"></div><div class="meta"></div></div>
+      <div style="display:flex;gap:6px;align-items:center"><span class="state ${st}">${it.error ? 'Failed' : 'Waiting'}</span><button class="icon-btn" aria-label="Remove">✕</button></div>`;
+    el.querySelector('.name').textContent = `${it.folder}/${it.name}`;
+    el.querySelector('.meta').textContent = it.error || (navigator.onLine ? 'Uploading soon' : 'Offline. Will upload when you reconnect.');
+    el.querySelector('button').onclick = async () => { await outboxDel(it.id); drawLists(); };
+    $('#outbox').appendChild(el);
+  }
+  $('#recent').innerHTML = recent.length ? '' : '<div class="empty">No receipts saved yet.</div>';
+  for (const r of recent) {
+    const el = document.createElement('div'); el.className = 'item';
+    el.innerHTML = `<div style="min-width:0"><div class="name"></div><div class="meta"></div></div><span class="state done">Saved</span>`;
+    const name = el.querySelector('.name');
+    if (r.url) { const a = document.createElement('a'); a.href = r.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = r.name; name.appendChild(a); } else name.textContent = r.name;
+    el.querySelector('.meta').textContent = `${r.folder} · ${new Date(r.at).toLocaleString()}`;
+    $('#recent').appendChild(el);
+  }
+}
+
+// ---------- OneDrive via Microsoft Graph ----------
+let msalApp = null;
+async function initMsal() {
+  msalApp = null;
+  if (!settings.clientId || !window.msal) return updateStatus();
+  try {
+    msalApp = new msal.PublicClientApplication({
+      auth: { clientId: settings.clientId.trim(), authority: 'https://login.microsoftonline.com/common', redirectUri: REDIRECT },
+      cache: { cacheLocation: 'localStorage' }
+    });
+    const r = await msalApp.handleRedirectPromise();
+    if (r?.account) { msalApp.setActiveAccount(r.account); toast('OneDrive connected.'); }
+    if (!msalApp.getActiveAccount() && msalApp.getAllAccounts()[0]) msalApp.setActiveAccount(msalApp.getAllAccounts()[0]);
+  } catch (e) { toast('Sign-in problem: ' + e.message, 6000); }
+  updateStatus();
+}
+const signedIn = () => !!msalApp?.getActiveAccount();
+function updateStatus() {
+  const s = $('#status');
+  if (signedIn()) { s.className = 'chip on'; s.textContent = 'OneDrive ✓'; s.title = msalApp.getActiveAccount().username; }
+  else { s.className = 'chip off'; s.textContent = settings.clientId ? 'Not signed in' : 'Not connected'; s.title = ''; }
+}
+async function getToken() {
+  const account = msalApp.getActiveAccount();
+  try { return (await msalApp.acquireTokenSilent({ scopes: SCOPES, account })).accessToken; }
+  catch (e) {
+    if (e instanceof msal.InteractionRequiredAuthError) return (await msalApp.acquireTokenPopup({ scopes: SCOPES, account })).accessToken;
+    throw e;
+  }
+}
+const encPath = p => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+async function graphError(r) { let m = `${r.status}`; try { m = (await r.json()).error?.message || m; } catch {} return new Error('OneDrive said: ' + m); }
+
+async function upload(blob, folder, name) {
+  const token = await getToken();
+  const base = `https://graph.microsoft.com/v1.0/me/drive/root:/${encPath(folder + '/' + name)}:`;
+  if (blob.size < 4 * 1024 * 1024) {
+    const r = await fetch(`${base}/content?@microsoft.graph.conflictBehavior=rename`, { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/pdf' }, body: blob });
+    if (!r.ok) throw await graphError(r);
+    return r.json();
+  }
+  const s = await fetch(`${base}/createUploadSession`, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } }) });
+  if (!s.ok) throw await graphError(s);
+  const { uploadUrl } = await s.json(), CHUNK = 327680 * 10;
+  for (let start = 0; start < blob.size; start += CHUNK) {
+    const end = Math.min(start + CHUNK, blob.size);
+    const r = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Range': `bytes ${start}-${end - 1}/${blob.size}` }, body: blob.slice(start, end) });
+    if (!r.ok) throw await graphError(r);
+    if (end === blob.size) return r.json();
+  }
+}
+
+let flushing = false;
+async function flushOutbox() {
+  if (flushing || !signedIn() || !navigator.onLine) return drawLists();
+  flushing = true;
+  try {
+    for (const it of await outboxAll()) {
+      try {
+        const res = await upload(it.blob, it.folder, it.name);
+        await outboxDel(it.id);
+        addRecent({ name: res.name || it.name, folder: it.folder, url: res.webUrl, at: Date.now() });
+        toast(`Saved to OneDrive: ${it.folder}/${res.name || it.name}`);
+      } catch (e) {
+        if (!navigator.onLine || e instanceof TypeError) break; // network dropped; try again later
+        it.error = e.message; await outboxPut(it);
+      }
+    }
+  } finally { flushing = false; drawLists(); }
+}
+
+// ---------- actions ----------
+function resetScan() {
+  pages = []; drawTray();
+  for (const id of ['#fVendor', '#fAmount']) $(id).value = '';
+  $('#fDate').value = today(); updatePreview();
+}
+
+$('#btnSave').onclick = async () => {
+  if (!settings.clientId || !signedIn()) { toast('Connect OneDrive first: open Settings, then "Connect OneDrive".', 5000); return openSettings(true); }
+  let blob; try { blob = buildPdf(); } catch (e) { return toast(e.message); }
+  await outboxPut({ blob, name: fileName(), folder: folderPath(), created: Date.now() });
+  resetScan();
+  if (!navigator.onLine) toast('You are offline. The receipt is queued and will upload when you reconnect.', 5000);
+  busy(navigator.onLine, 'Uploading…'); await flushOutbox(); busy(false);
+};
+
+function saveLocal(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+$('#btnDownload').onclick = () => { try { saveLocal(buildPdf(), fileName()); } catch (e) { toast(e.message); } };
+
+$('#btnEmail').onclick = async () => {
+  let blob; try { blob = buildPdf(); } catch (e) { return toast(e.message); }
+  const name = fileName(), file = new File([blob], name, { type: 'application/pdf' });
+  const subject = `${settings.tag || ''} ${name.replace(/\.pdf$/, '')}`.trim();
+  if (settings.email) { try { await navigator.clipboard.writeText(settings.email); } catch {} }
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: subject, text: subject });
+      toast(settings.email ? `Send it to ${settings.email} (address copied).` : 'Shared.', 5000);
+    } catch (e) { if (e.name !== 'AbortError') toast('Sharing failed: ' + e.message); }
+  } else {
+    saveLocal(blob, name);
+    toast(`This browser can't attach files to email. PDF downloaded; attach it to an email${settings.email ? ' to ' + settings.email : ''} with subject "${subject}".`, 7000);
+  }
+};
+
+// ---------- settings dialog ----------
+function openSettings(openOneDrive) {
+  $('#sFolder').value = settings.folder; $('#sName').value = settings.name; $('#sMode').value = settings.mode;
+  $('#sClient').value = settings.clientId; $('#sEmail').value = settings.email; $('#sTag').value = settings.tag;
+  $('#redirectUri').textContent = REDIRECT;
+  if (openOneDrive === true) $('#settings details').open = true;
+  $('#settings').showModal();
+}
+function readSettingsForm() {
+  const prevClient = settings.clientId;
+  Object.assign(settings, { folder: $('#sFolder').value.trim() || DEFAULTS.folder, name: $('#sName').value.trim() || DEFAULTS.name, mode: $('#sMode').value,
+    clientId: $('#sClient').value.trim(), email: $('#sEmail').value.trim(), tag: $('#sTag').value.trim() });
+  saveSettings(); updatePreview();
+  return prevClient !== settings.clientId;
+}
+$('#openSettings').onclick = openSettings;
+$('#settings').addEventListener('close', async () => { if ($('#settings').returnValue === 'save' && readSettingsForm()) await initMsal(); });
+$('#btnSignIn').onclick = async () => {
+  if (readSettingsForm() || !msalApp) await initMsal();
+  if (!msalApp) return toast('Paste your Application (client) ID first.');
+  msalApp.loginRedirect({ scopes: SCOPES, redirectUri: REDIRECT });
+};
+$('#btnSignOut').onclick = async () => {
+  if (!msalApp) return;
+  const account = msalApp.getActiveAccount();
+  await msalApp.logoutRedirect({ account, postLogoutRedirectUri: REDIRECT });
+};
+
+// ---------- wiring ----------
+$('#cam').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+$('#lib').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+for (const id of ['#fDate', '#fVendor', '#fAmount', '#fCurrency', '#fTrip']) $(id).addEventListener('input', updatePreview);
+$('#fCurrency').addEventListener('change', () => { settings.currency = $('#fCurrency').value.toUpperCase(); saveSettings(); });
+$('#fTrip').addEventListener('change', () => { try { localStorage.setItem('rd.trip', $('#fTrip').value); } catch {} });
+window.addEventListener('online', flushOutbox);
+window.addEventListener('offline', drawLists);
+
+$('#fDate').value = today();
+$('#fCurrency').value = settings.currency || '';
+try { $('#fTrip').value = localStorage.getItem('rd.trip') || ''; } catch {}
+updatePreview(); drawTray();
+initMsal().then(flushOutbox);
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
