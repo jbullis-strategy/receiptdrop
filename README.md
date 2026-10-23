@@ -3,13 +3,14 @@
 A phone web app that scans receipts into PDFs and files them straight into a OneDrive folder.
 
 - **Scan:** opens your phone camera. Tap Scan again for each extra page. Each page can be rotated, removed, or switched between clean black-and-white and original color.
+- **Paste email:** copy an emailed receipt (Uber, hotel folio, airline) in your mail app and tap Paste email. The app turns it into a PDF page and fills in the date, total, and vendor when it can find them.
 - **Name:** files are named from the date, vendor and description, and amount, for example `2026-10-21_Delta-New-York-to-London_612.40USD.pdf`. They go into `Receipts/2026/<trip>/` by default; a trip name is required for every receipt. You can change both patterns in Settings, and you can add `{trip}` to either.
 - **Save to OneDrive:** uploads directly through Microsoft's OneDrive API, so you don't need to email anything. If you're offline, for example on a plane, the receipt waits in the Outbox and uploads by itself when you reconnect.
 - **Email:** opens your phone's share sheet with the PDF attached, for the email-to-folder routine described below.
 
 ## 1. Host it (one time, free)
 
-The app is 6 static files. Any HTTPS host works. GitHub Pages is the easiest:
+The app is 7 files (6 app files plus this README). Any HTTPS host works. GitHub Pages is the easiest:
 
 1. Create a new GitHub repository, for example `receipt-drop`, and upload all the files in this folder.
 2. In the repository, go to Settings → Pages, set Source to "Deploy from a branch", choose `main` / root, and save.

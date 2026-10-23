@@ -42,9 +42,14 @@ button:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visi
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: default; }
 .icon-btn { padding: 8px 10px; }
-.capture { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
-.capture label { border: 1.5px dashed var(--accent); color: var(--accent); background: var(--paper); border-radius: 12px; padding: 18px 12px; text-align: center; font-weight: 600; cursor: pointer; }
-.capture label.secondary { border-color: var(--line); color: var(--muted); font-weight: 500; }
+.capture { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; }
+.capture label, .capture button { border: 1.5px dashed var(--accent); color: var(--accent); background: var(--paper); border-radius: 12px; padding: 18px 8px; text-align: center; font-weight: 600; cursor: pointer; line-height: 1.3; }
+.capture .secondary { border-color: var(--line); color: var(--muted); font-weight: 500; }
+.pastebox { min-height: 140px; max-height: 40vh; overflow: auto; border: 1.5px dashed var(--accent); border-radius: 10px; padding: 12px; background: var(--bg); color: var(--muted); }
+.pastebox:empty::before { content: "Tap and hold here, then choose Paste"; }
+#renderStage { position: absolute; left: -10000px; top: 0; width: 600px; padding: 16px; background: #ffffff; color: #111111; font: 14px/1.45 Arial, Helvetica, sans-serif; }
+#renderStage img { max-width: 100%; height: auto; }
+#renderStage pre { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; margin: 0; }
 .capture input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .tray { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
 .tray:empty::before { content: "No pages yet. Scan the receipt; tap Scan again for each extra page."; color: var(--muted); font-size: 14px; padding: 6px 0; }
@@ -104,6 +109,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
     <div class="capture">
       <label for="cam">Scan receipt<input id="cam" type="file" accept="image/*" capture="environment"></label>
       <label for="lib" class="secondary">From photos<input id="lib" type="file" accept="image/*" multiple></label>
+      <button type="button" id="btnPaste" class="secondary">Paste email</button>
     </div>
   </section>
 
@@ -145,6 +151,17 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
     <button id="btnDownload" aria-label="Download PDF">PDF ↓</button>
   </div>
 </div>
+
+<dialog id="pasteDlg">
+  <div class="dlg">
+    <h3>Paste an emailed receipt</h3>
+    <p class="hint">In your email app, open the receipt, choose Select All, and copy. Then tap and hold the box below and choose Paste. On a computer, click the box and press Ctrl+V.</p>
+    <div id="pasteBox" class="pastebox" contenteditable="true" role="textbox" aria-label="Paste the receipt here"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" id="pasteCancel">Cancel</button></div>
+  </div>
+</dialog>
+
+<div id="renderStage" aria-hidden="true"></div>
 
 <dialog id="settings">
   <form class="dlg" method="dialog" id="settingsForm">
@@ -196,6 +213,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
 <div id="busy" class="busy" hidden><span id="busyText">Working…</span></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
 <script>
 const $ = s => document.querySelector(s);
@@ -518,6 +536,94 @@ $('#btnSignOut').onclick = async () => {
 };
 
 // ---------- wiring ----------
+// ---------- paste an emailed receipt ----------
+const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+const CURRENCIES = ['USD','CAD','EUR','GBP','AUD','NZD','CHF','JPY','MXN','SEK','NOK','DKK','SGD','HKD','INR'];
+
+// Pull the total, date and vendor out of the receipt text. Only fills fields the user hasn't typed in.
+function guessFields(text) {
+  const t = text.replace(/\s+/g, ' ');
+  const total = t.match(/\b(?:grand total|total charged|amount charged|you paid|total)\b[^0-9$€£]{0,25}?(\$|€|£|[A-Z]{3})?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+[.,]\d{2})/i);
+  if (total && !$('#fAmount').value) {
+    $('#fAmount').value = total[2].replace(/,(?=\d{3}(\D|$))/g, '');
+    const cur = { '€': 'EUR', '£': 'GBP' }[total[1]] || (CURRENCIES.includes(total[1]) ? total[1] : '');
+    if (cur) $('#fCurrency').value = cur;
+  }
+  const d = t.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (\d{1,2}),? (20\d\d)\b/i)
+    || t.match(/\b(\d{1,2}) (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (20\d\d)\b/i);
+  if (d && $('#fDate').value === today()) {
+    const [mon, day] = isNaN(d[1]) ? [d[1], d[2]] : [d[2], d[1]];
+    $('#fDate').value = `${d[3]}-${pad(MONTHS.indexOf(mon.toLowerCase().slice(0, 3)) + 1)}-${pad(day)}`;
+  }
+  if (!$('#fVendor').value) {
+    const v = /uber\s*eats/i.test(t) ? 'Uber Eats' : /\buber\b/i.test(t) ? 'Uber ride' : /\blyft\b/i.test(t) ? 'Lyft ride' : '';
+    if (v) $('#fVendor').value = v;
+  }
+  updatePreview();
+}
+
+function cleanHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script,style,link,meta,base,title,iframe,object,embed,form,input,button,video,audio').forEach(n => n.remove());
+  doc.querySelectorAll('*').forEach(n => { for (const a of [...n.attributes]) if (/^on/i.test(a.name) || /^javascript:/i.test(a.value)) n.removeAttribute(a.name); });
+  return doc.body.innerHTML;
+}
+
+async function addPasted({ html, text }) {
+  if (!html && !text?.trim()) return toast('There was nothing to paste. Copy the receipt in your email app first.');
+  if (!window.html2canvas) return toast('The paste feature needs an internet connection the first time it runs.');
+  busy(true, 'Making PDF page…');
+  const stage = $('#renderStage');
+  try {
+    if (html) stage.innerHTML = cleanHtml(html);
+    else { const pre = document.createElement('pre'); pre.textContent = text; stage.replaceChildren(pre); }
+    await Promise.all([...stage.querySelectorAll('img')].map(img => img.complete ? 0 : new Promise(r => { img.onload = img.onerror = r; setTimeout(r, 4000); })));
+    const canvas = await html2canvas(stage, { backgroundColor: '#ffffff', scale: 2, useCORS: true, imageTimeout: 4000, logging: false });
+    // Very long emails are split so no PDF page gets taller than about 20 page-widths.
+    const slice = canvas.width * 20;
+    for (let y = 0; y < canvas.height; y += slice) {
+      const c = document.createElement('canvas'); c.width = canvas.width; c.height = Math.min(slice, canvas.height - y);
+      c.getContext('2d').drawImage(canvas, 0, -y);
+      const p = { src: c, rot: 0, mode: 'color' }; render(p); pages.push(p);
+    }
+    guessFields(stage.innerText || text || '');
+    toast('Receipt added. Check the amount and description before saving.', 4500);
+  } catch (e) { toast('Could not turn that into a page: ' + e.message, 6000); }
+  stage.replaceChildren(); busy(false); drawTray();
+}
+
+function fromClipboardEvent(e) {
+  const dt = e.clipboardData; if (!dt) return false;
+  const imgs = [...dt.files].filter(f => f.type.startsWith('image/'));
+  const html = dt.getData('text/html'), text = dt.getData('text/plain');
+  if (!html && !text && !imgs.length) return false;
+  e.preventDefault();
+  if (imgs.length && !html) addFiles(imgs); else addPasted({ html, text });
+  return true;
+}
+
+$('#btnPaste').onclick = async () => {
+  // Read the clipboard directly where the browser allows it; otherwise show a box to paste into.
+  try {
+    const items = await Promise.race([navigator.clipboard.read(), new Promise((_, no) => setTimeout(no, 5000))]);
+    for (const it of items) {
+      if (it.types.includes('text/html')) return addPasted({ html: await (await it.getType('text/html')).text() });
+      const img = it.types.find(t => t.startsWith('image/'));
+      if (img) return addFiles([new File([await it.getType(img)], 'pasted.png', { type: img })]);
+      if (it.types.includes('text/plain')) return addPasted({ text: await (await it.getType('text/plain')).text() });
+    }
+  } catch {}
+  $('#pasteBox').replaceChildren(); $('#pasteDlg').showModal(); $('#pasteBox').focus();
+};
+$('#pasteBox').addEventListener('paste', e => { if (fromClipboardEvent(e)) $('#pasteDlg').close(); });
+$('#pasteBox').addEventListener('input', () => { // some phones paste without a usable clipboard event
+  const box = $('#pasteBox'); if (!box.innerHTML.trim()) return;
+  $('#pasteDlg').close(); addPasted({ html: box.innerHTML, text: box.innerText }); box.replaceChildren();
+});
+$('#pasteCancel').onclick = () => $('#pasteDlg').close();
+// On a computer, Ctrl+V anywhere outside a text box adds the clipboard as a receipt.
+document.addEventListener('paste', e => { if (!e.target.closest('input, textarea, [contenteditable], dialog')) fromClipboardEvent(e); });
+
 $('#cam').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
 $('#lib').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
 for (const id of ['#fDate', '#fVendor', '#fAmount', '#fCurrency', '#fTrip']) $(id).addEventListener('input', updatePreview);
