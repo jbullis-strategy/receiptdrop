@@ -569,6 +569,25 @@ function cleanHtml(html) {
   return doc.body.innerHTML;
 }
 
+// Returns [top, bottom] pixel ranges, each at most pageH tall, cut at a blank row near the bottom of each page where one exists.
+function pageBreaks(canvas, pageH) {
+  const ctx = canvas.getContext('2d'), W = canvas.width, out = [];
+  let y = 0;
+  while (canvas.height - y > pageH) {
+    const from = y + Math.round(pageH * 0.7), to = y + pageH;
+    const px = ctx.getImageData(0, from, W, to - from).data;
+    let cut = to;
+    for (let row = to - from - 1; row >= 0; row--) {
+      let blank = true;
+      for (let x = 0; x < W && blank; x += 3) { const i = (row * W + x) * 4; blank = px[i] > 240 && px[i + 1] > 240 && px[i + 2] > 240; }
+      if (blank) { cut = from + row; break; }
+    }
+    out.push([y, cut]); y = cut;
+  }
+  out.push([y, canvas.height]);
+  return out;
+}
+
 async function addPasted({ html, text }) {
   if (!html && !text?.trim()) return toast('There was nothing to paste. Copy the receipt in your email app first.');
   if (!window.html2canvas) return toast('The paste feature needs an internet connection the first time it runs.');
@@ -578,18 +597,27 @@ async function addPasted({ html, text }) {
     if (html) stage.innerHTML = cleanHtml(html);
     else { const pre = document.createElement('pre'); pre.textContent = text; stage.replaceChildren(pre); }
     await Promise.all([...stage.querySelectorAll('img')].map(img => img.complete ? 0 : new Promise(r => { img.onload = img.onerror = r; setTimeout(r, 4000); })));
-    const canvas = await html2canvas(stage, { backgroundColor: '#ffffff', scale: 2, useCORS: true, imageTimeout: 4000, logging: false });
-    // Very long emails are split so no PDF page gets taller than about 20 page-widths.
-    const slice = canvas.width * 20;
-    for (let y = 0; y < canvas.height; y += slice) {
-      const c = document.createElement('canvas'); c.width = canvas.width; c.height = Math.min(slice, canvas.height - y);
-      c.getContext('2d').drawImage(canvas, 0, -y);
+    // Widen the canvas to fit emails laid out wider than 600px, so nothing is cropped on the right.
+    const w = Math.min(1400, Math.max(600, stage.scrollWidth + 32)); // + side padding, which scrollWidth leaves out when content overflows
+    stage.style.width = w + 'px';
+    const h = stage.scrollHeight;
+    // Aim for a 1200px-wide image, but stay under the ~16 megapixel canvas limit on iPhones.
+    let scale = Math.min(2, 1200 / w);
+    while (w * h * scale * scale > 15e6 && scale > 0.4) scale *= 0.85;
+    const canvas = await html2canvas(stage, { backgroundColor: '#ffffff', scale, useCORS: true, imageTimeout: 4000, logging: false,
+      width: w, height: h, windowWidth: Math.max(w, innerWidth), windowHeight: Math.max(h, innerHeight), scrollX: 0, scrollY: 0 });
+    // Split into letter-size pages, breaking at blank rows so lines of text aren't cut in half.
+    const pageH = Math.round(canvas.width * 11 / 8.5);
+    for (const [top, bottom] of pageBreaks(canvas, pageH)) {
+      const c = document.createElement('canvas'); c.width = canvas.width; c.height = pageH;
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(canvas, 0, top, canvas.width, bottom - top, 0, 0, canvas.width, bottom - top);
       const p = { src: c, rot: 0, mode: 'color' }; render(p); pages.push(p);
     }
     guessFields(stage.innerText || text || '');
     toast('Receipt added. Check the amount and description before saving.', 4500);
   } catch (e) { toast('Could not turn that into a page: ' + e.message, 6000); }
-  stage.replaceChildren(); busy(false); drawTray();
+  stage.replaceChildren(); stage.style.width = ''; busy(false); drawTray();
 }
 
 function fromClipboardEvent(e) {
