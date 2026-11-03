@@ -3,9 +3,9 @@
 A phone web app that scans receipts into PDFs and files them straight into a OneDrive folder.
 
 - **Scan:** opens your phone camera. Tap Scan again for each extra page. Each page can be rotated, removed, or switched between clean black-and-white and original color.
-- **Paste email:** copy an emailed receipt (Uber, hotel folio, airline) in your mail app and tap Paste email. The app turns it into a PDF page and fills in the date, total, and vendor when it can find them.
-- **Name:** files are named from the date, vendor and description, and amount, for example `2026-10-21_Delta-New-York-to-London_612.40USD.pdf`. They go into `Receipts/2026/<trip>/` by default; a trip name is required for every receipt. You can change both patterns in Settings, and you can add `{trip}` to either.
-- **Save to OneDrive:** uploads directly through Microsoft's OneDrive API, so you don't need to email anything. If you're offline, for example on a plane, the receipt waits in the Outbox and uploads by itself when you reconnect.
+- **Paste email:** copy an emailed receipt (Uber, hotel folio, airline) in your mail app and tap Paste email. The app turns it into a PDF page and fills in the date, total, currency, and vendor from the receipt, replacing whatever was in those boxes.
+- **Name:** files are named from the date, vendor and description, and amount, for example `2026-10-21_Delta-New-York-to-London_612.40USD.pdf`. They go into `Receipts/2026/<trip>/` by default; a trip name is required for every receipt. Tap **Change folder** to pick any OneDrive folder, and change the subfolders or the file name pattern in Settings.
+- **Save to OneDrive:** uploads directly through Microsoft's OneDrive API, so you don't need to email anything. If you're not signed in yet, tapping it takes you to Microsoft's sign-in page, and the receipt uploads as soon as you come back. If you're offline, for example on a plane, the receipt waits in the Outbox and uploads by itself when you reconnect.
 - **Email:** opens your phone's share sheet with the PDF attached, for the email-to-folder routine described below.
 
 ## 1. Host it (one time, free)

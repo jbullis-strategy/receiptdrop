@@ -34,7 +34,7 @@ body { background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans);
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
-.chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--paper); white-space: nowrap; }
+.chip { font: inherit; font-size: 13px; font-weight: 600; padding: 9px 14px; cursor: pointer; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--paper); white-space: nowrap; }
 .chip.on { color: var(--ok); border-color: currentColor; }
 .chip.off { color: var(--warn); border-color: currentColor; }
 button, .btn { font: inherit; font-weight: 500; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 10px 14px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; }
@@ -42,6 +42,15 @@ button:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visi
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: default; }
 .icon-btn { padding: 8px 10px; }
+#openSettings { font-size: 22px; min-width: 44px; min-height: 44px; padding: 4px 10px; }
+.saveto { display: grid; gap: 8px; }
+.saveto button { justify-self: start; }
+.pickrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 14px; color: var(--muted); }
+.crumbs button { border: 0; background: none; padding: 4px 6px; color: var(--accent); }
+.crumbs button:disabled { color: var(--ink); opacity: 1; font-weight: 600; }
+.folders { max-height: 38vh; overflow: auto; }
+.folders button { justify-content: space-between; width: 100%; text-align: left; }
 .capture { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; }
 .capture label, .capture button { border: 1.5px dashed var(--accent); color: var(--accent); background: var(--paper); border-radius: 12px; padding: 18px 8px; text-align: center; font-weight: 600; cursor: pointer; line-height: 1.3; }
 .capture .secondary { border-color: var(--line); color: var(--muted); font-weight: 500; }
@@ -100,7 +109,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
   <header>
     <h1>Receipt Drop</h1>
     <div style="display:flex;gap:8px;align-items:center">
-      <span id="status" class="chip">…</span>
+      <button type="button" id="status" class="chip">…</button>
       <button id="openSettings" class="icon-btn" aria-label="Settings">⚙︎</button>
     </div>
   </header>
@@ -130,7 +139,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
 
   <section>
     <h2>Will be saved as</h2>
-    <div class="filename" id="preview"></div>
+    <div class="saveto"><div class="filename" id="preview"></div><button type="button" id="btnFolder">Change folder</button></div>
   </section>
 
   <section>
@@ -161,13 +170,26 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
   </div>
 </dialog>
 
+<dialog id="folderDlg">
+  <div class="dlg">
+    <h3>Choose a OneDrive folder</h3>
+    <div id="fdCrumbs" class="crumbs"></div>
+    <div id="fdList" class="list folders"></div>
+    <div id="fdSignedOut" hidden><p class="hint" style="margin-bottom:8px">Sign in to browse your OneDrive folders, or type a folder path below.</p><button type="button" id="fdSignIn" class="primary">Sign in to OneDrive</button></div>
+    <div id="fdNewRow" class="pickrow"><input id="fdNewName" placeholder="New folder name" autocomplete="off" aria-label="New folder name"><button type="button" id="fdCreate">Create folder</button></div>
+    <label class="field"><span>Folder path</span><input id="fdPath" class="mono" placeholder="(top level of OneDrive)"></label>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" id="fdCancel">Cancel</button><button type="button" id="fdUse" class="primary">Use this folder</button></div>
+  </div>
+</dialog>
+
 <div id="renderStage" aria-hidden="true"></div>
 
 <dialog id="settings">
   <form class="dlg" method="dialog" id="settingsForm">
     <h3>Settings</h3>
 
-    <label class="field"><span>OneDrive folder (use {YYYY}, {MM}, {trip})</span><input id="sFolder" class="mono"></label>
+    <div class="field"><span>Save receipts in this OneDrive folder</span><div class="pickrow"><input id="sBase" class="mono" placeholder="(top level of OneDrive)" aria-label="OneDrive folder"><button type="button" id="sBrowse">Browse…</button></div></div>
+    <label class="field"><span>Subfolders inside it ({YYYY}, {MM}, {trip}; leave empty for none)</span><input id="sSub" class="mono"></label>
     <label class="field"><span>File name pattern ({date}, {vendor} (vendor and description), {amount}, {currency}, {trip})</span><input id="sName" class="mono"></label>
     <label class="field"><span>Default scan look</span>
       <select id="sMode"><option value="doc">Document (clean black and white)</option><option value="color">Original color</option></select></label>
@@ -223,12 +245,17 @@ const REDIRECT = location.origin + location.pathname;
 // ---------- settings ----------
 // Paste your Application (client) ID here to share the app: everyone who opens it can then just sign in.
 const BUILT_IN_CLIENT_ID = 'a797d6d9-f225-4ba6-b9eb-a791905ff7b8';
-const DEFAULTS = { folder: 'Receipts/{YYYY}/{trip}', name: '{date}_{vendor}_{amount}{currency}', mode: 'doc', clientId: BUILT_IN_CLIENT_ID, email: '', tag: '#receipt', currency: 'USD' };
+const DEFAULTS = { base: 'Receipts', sub: '{YYYY}/{trip}', name: '{date}_{vendor}_{amount}{currency}', mode: 'doc', clientId: BUILT_IN_CLIENT_ID, email: '', tag: '#receipt', currency: 'USD' };
 let settings = { ...DEFAULTS };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('rd.settings') || '{}')); } catch {}
 if (BUILT_IN_CLIENT_ID) settings.clientId = BUILT_IN_CLIENT_ID;
 const saveSettings = () => { try { localStorage.setItem('rd.settings', JSON.stringify(settings)); } catch {} };
-if (settings.folder === 'Receipts/{YYYY}/{MM}') { settings.folder = DEFAULTS.folder; saveSettings(); } // move people still on the old default
+// Older versions kept one folder pattern; split it into the chosen folder and the subfolder pattern.
+if ('folder' in settings) {
+  const f = settings.folder === 'Receipts/{YYYY}/{MM}' ? 'Receipts/{YYYY}/{trip}' : String(settings.folder), i = f.indexOf('{');
+  settings.base = (i < 0 ? f : f.slice(0, i)).replace(/^\/+|\/+$/g, ''); settings.sub = i < 0 ? '' : f.slice(i);
+  delete settings.folder; saveSettings();
+}
 
 // ---------- ui helpers ----------
 let toastTimer;
@@ -326,8 +353,9 @@ function fileName(m = meta()) {
   let n = fill(settings.name, m).replace(/_+/g, '_').replace(/[_-]+$/, '').replace(/^[_-]+/, '');
   return (n || 'receipt') + '.pdf';
 }
+const cleanPath = p => p.split('/').map(s => s.trim()).filter(Boolean).join('/');
 function folderPath(m = meta()) {
-  return fill(settings.folder, m).split('/').map(s => s.trim()).filter(Boolean).join('/');
+  return cleanPath(`${settings.base}/${fill(settings.sub, m)}`);
 }
 function updatePreview() {
   const m = meta(); if (!m.trip) m.trip = '[trip]';
@@ -356,18 +384,42 @@ function buildPdf() {
 let dbp;
 function db() {
   return dbp ||= new Promise((res, rej) => {
-    const r = indexedDB.open('receipt-drop', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
+    const r = indexedDB.open('receipt-drop', 2);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if (!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
+      if (!d.objectStoreNames.contains('draft')) d.createObjectStore('draft');
+    };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
 }
-async function tx(mode, fn) {
+async function tx(mode, fn, store = 'outbox') {
   const d = await db();
-  return new Promise((res, rej) => { const t = d.transaction('outbox', mode), s = t.objectStore('outbox'); const r = fn(s); t.oncomplete = () => res(r?.result); t.onerror = () => rej(t.error); });
+  return new Promise((res, rej) => { const t = d.transaction(store, mode), s = t.objectStore(store); const r = fn(s); t.oncomplete = () => res(r?.result); t.onerror = () => rej(t.error); });
 }
 const outboxAll = () => tx('readonly', s => s.getAll());
 const outboxPut = item => tx('readwrite', s => s.put(item));
 const outboxDel = id => tx('readwrite', s => s.delete(id));
+
+const DRAFT_FIELDS = ['fDate', 'fVendor', 'fAmount', 'fCurrency'];
+async function saveDraft(extra = {}) {
+  const d = { ...extra, pages: pages.map(p => ({ src: p.src.toDataURL('image/jpeg', 0.92), rot: p.rot, mode: p.mode })),
+    fields: Object.fromEntries(DRAFT_FIELDS.map(id => [id, $('#' + id).value])) };
+  await tx('readwrite', s => s.put(d, 'current'), 'draft');
+}
+async function restoreDraft() {
+  const d = await tx('readonly', s => s.get('current'), 'draft').catch(() => null);
+  if (!d) return null;
+  await tx('readwrite', s => s.delete('current'), 'draft').catch(() => {});
+  for (const [id, v] of Object.entries(d.fields || {})) $('#' + id).value = v;
+  for (const q of d.pages || []) {
+    const img = new Image(); img.src = q.src; await img.decode();
+    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0);
+    const p = { src: c, rot: q.rot, mode: q.mode }; render(p); pages.push(p);
+  }
+  drawTray(); updatePreview();
+  return d;
+}
 
 let recent = [];
 try { recent = JSON.parse(localStorage.getItem('rd.recent') || '[]'); } catch {}
@@ -382,7 +434,7 @@ async function drawLists() {
     el.innerHTML = `<div style="min-width:0"><div class="name"></div><div class="meta"></div></div>
       <div style="display:flex;gap:6px;align-items:center"><span class="state ${st}">${it.error ? 'Failed' : 'Waiting'}</span><button class="icon-btn" aria-label="Remove">✕</button></div>`;
     el.querySelector('.name').textContent = `${it.folder}/${it.name}`;
-    el.querySelector('.meta').textContent = it.error || (navigator.onLine ? 'Uploading soon' : 'Offline. Will upload when you reconnect.');
+    el.querySelector('.meta').textContent = it.error || (!signedIn() ? 'Waiting for you to sign in. Tap "Sign in" at the top.' : navigator.onLine ? 'Uploading soon' : 'Offline. Will upload when you reconnect.');
     el.querySelector('button').onclick = async () => { await outboxDel(it.id); drawLists(); };
     $('#outbox').appendChild(el);
   }
@@ -414,10 +466,19 @@ async function initMsal() {
   updateStatus();
 }
 const signedIn = () => !!msalApp?.getActiveAccount();
+// Sends the user to Microsoft's sign-in page. Whatever is on screen is kept and restored when they come back.
+async function signIn(extra) {
+  if (!msalApp) await initMsal();
+  if (!msalApp) { toast('Add your Application (client) ID in Settings first.'); return openSettings(true); }
+  try { await saveDraft(extra); } catch {}
+  busy(true, 'Opening Microsoft sign-in…');
+  try { await msalApp.loginRedirect({ scopes: SCOPES, redirectUri: REDIRECT }); }
+  catch (e) { busy(false); toast('Sign-in problem: ' + e.message, 6000); }
+}
 function updateStatus() {
   const s = $('#status');
   if (signedIn()) { s.className = 'chip on'; s.textContent = 'OneDrive ✓'; s.title = msalApp.getActiveAccount().username; }
-  else { s.className = 'chip off'; s.textContent = settings.clientId ? 'Not signed in' : 'Not connected'; s.title = ''; }
+  else { s.className = 'chip off'; s.textContent = 'Sign in'; s.title = 'Sign in to OneDrive'; }
 }
 async function getToken() {
   const account = msalApp.getActiveAccount();
@@ -428,7 +489,7 @@ async function getToken() {
   }
 }
 const encPath = p => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-async function graphError(r) { let m = `${r.status}`; try { m = (await r.json()).error?.message || m; } catch {} return new Error('OneDrive said: ' + m); }
+async function graphError(r) { let m = `${r.status}`; try { m = (await r.json()).error?.message || m; } catch {} return Object.assign(new Error('OneDrive said: ' + m), { status: r.status }); }
 
 async function upload(blob, folder, name) {
   const token = await getToken();
@@ -476,10 +537,12 @@ function resetScan() {
 }
 
 $('#btnSave').onclick = async () => {
-  if (!settings.clientId || !signedIn()) { toast(BUILT_IN_CLIENT_ID ? 'Sign in to OneDrive first.' : 'Connect OneDrive first: open Settings, then "Connect OneDrive".', 5000); return openSettings(true); }
+  if (!settings.clientId) { toast('Connect OneDrive first: open Settings, then "Connect OneDrive".', 5000); return openSettings(true); }
   let blob; try { blob = buildPdf(); } catch (e) { return toast(e.message); }
   await outboxPut({ blob, name: fileName(), folder: folderPath(), created: Date.now() });
   resetScan();
+  // Not signed in yet: the receipt waits in the Outbox and uploads as soon as sign-in finishes.
+  if (!signedIn()) return signIn();
   if (!navigator.onLine) toast('You are offline. The receipt is queued and will upload when you reconnect.', 5000);
   busy(navigator.onLine, 'Uploading…'); await flushOutbox(); busy(false);
 };
@@ -508,7 +571,7 @@ $('#btnEmail').onclick = async () => {
 
 // ---------- settings dialog ----------
 function openSettings(openOneDrive) {
-  $('#sFolder').value = settings.folder; $('#sName').value = settings.name; $('#sMode').value = settings.mode;
+  $('#sBase').value = settings.base; $('#sSub').value = settings.sub; $('#sName').value = settings.name; $('#sMode').value = settings.mode;
   $('#sClient').value = settings.clientId; $('#sEmail').value = settings.email; $('#sTag').value = settings.tag;
   $('#redirectUri').textContent = REDIRECT;
   $('#ownApp').hidden = !!BUILT_IN_CLIENT_ID; $('#builtInHint').hidden = !BUILT_IN_CLIENT_ID;
@@ -517,17 +580,17 @@ function openSettings(openOneDrive) {
 }
 function readSettingsForm() {
   const prevClient = settings.clientId;
-  Object.assign(settings, { folder: $('#sFolder').value.trim() || DEFAULTS.folder, name: $('#sName').value.trim() || DEFAULTS.name, mode: $('#sMode').value,
+  Object.assign(settings, { base: cleanPath($('#sBase').value), sub: $('#sSub').value.trim(), name: $('#sName').value.trim() || DEFAULTS.name, mode: $('#sMode').value,
     clientId: BUILT_IN_CLIENT_ID || $('#sClient').value.trim(), email: $('#sEmail').value.trim(), tag: $('#sTag').value.trim() });
   saveSettings(); updatePreview();
   return prevClient !== settings.clientId;
 }
 $('#openSettings').onclick = openSettings;
+$('#status').onclick = () => signedIn() ? openSettings(true) : signIn();
 $('#settings').addEventListener('close', async () => { if ($('#settings').returnValue === 'save' && readSettingsForm()) await initMsal(); });
 $('#btnSignIn').onclick = async () => {
-  if (readSettingsForm() || !msalApp) await initMsal();
-  if (!msalApp) return toast('Paste your Application (client) ID first.');
-  msalApp.loginRedirect({ scopes: SCOPES, redirectUri: REDIRECT });
+  if (readSettingsForm()) await initMsal();
+  signIn();
 };
 $('#btnSignOut').onclick = async () => {
   if (!msalApp) return;
@@ -535,31 +598,115 @@ $('#btnSignOut').onclick = async () => {
   await msalApp.logoutRedirect({ account, postLogoutRedirectUri: REDIRECT });
 };
 
+// ---------- folder picker ----------
+let fdPath = '', fdPick = null, fdSeq = 0;
+const childrenUrl = path => `https://graph.microsoft.com/v1.0/me/drive/${path ? `root:/${encPath(path)}:` : 'root'}/children`;
+async function browse(path) {
+  fdPath = cleanPath(path); $('#fdPath').value = fdPath;
+  const parts = fdPath ? fdPath.split('/') : [], crumbs = $('#fdCrumbs'); crumbs.replaceChildren();
+  [['OneDrive', ''], ...parts.map((n, i) => [n, parts.slice(0, i + 1).join('/')])].forEach(([label, target], i, all) => {
+    if (i) crumbs.append('›');
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.disabled = i === all.length - 1; b.onclick = () => browse(target);
+    crumbs.append(b);
+  });
+  const out = !signedIn(), list = $('#fdList');
+  $('#fdSignedOut').hidden = !out; list.hidden = out; $('#fdNewRow').hidden = out;
+  if (out) return;
+  const seq = ++fdSeq;
+  list.innerHTML = '<div class="empty">Loading folders…</div>';
+  try {
+    const token = await getToken(), found = [];
+    for (let url = childrenUrl(fdPath) + '?$select=name,folder&$top=200'; url;) {
+      const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+      if (!r.ok) throw await graphError(r);
+      const j = await r.json(); found.push(...j.value); url = j['@odata.nextLink'];
+    }
+    if (seq !== fdSeq) return;
+    list.replaceChildren();
+    const folders = found.filter(f => f.folder).sort((a, b) => a.name.localeCompare(b.name));
+    if (!folders.length) list.innerHTML = '<div class="empty">No folders inside this one. Use it as is, or create one below.</div>';
+    for (const f of folders) {
+      const b = document.createElement('button'); b.type = 'button'; b.innerHTML = '<span></span><span aria-hidden="true">›</span>';
+      b.firstChild.textContent = f.name; b.onclick = () => browse(`${fdPath}/${f.name}`); list.append(b);
+    }
+  } catch (e) {
+    if (seq !== fdSeq) return;
+    const msg = e.status === 404 ? "This folder doesn't exist yet. It will be created the first time you save a receipt." : e.message;
+    list.replaceChildren(Object.assign(document.createElement('div'), { className: 'empty', textContent: msg }));
+  }
+}
+function openFolderDlg(start, onPick) { fdPick = onPick; $('#fdNewName').value = ''; $('#folderDlg').showModal(); browse(start); }
+const pickMain = p => { settings.base = p; saveSettings(); updatePreview(); toast(`Receipts will be saved in OneDrive › ${p || 'top level'}`); };
+$('#btnFolder').onclick = () => openFolderDlg(settings.base, pickMain);
+$('#sBrowse').onclick = () => openFolderDlg($('#sBase').value, p => { $('#sBase').value = p; });
+$('#fdPath').addEventListener('change', () => browse($('#fdPath').value));
+$('#fdCancel').onclick = () => $('#folderDlg').close();
+$('#fdUse').onclick = () => { const p = cleanPath($('#fdPath').value); $('#folderDlg').close(); fdPick?.(p); };
+$('#fdSignIn').onclick = () => signIn({ reopen: 'folder' });
+$('#fdCreate').onclick = async () => {
+  const name = $('#fdNewName').value.trim().replace(/[\\/:*?"<>|#%]+/g, '');
+  if (!name) return $('#fdNewName').focus();
+  try {
+    const r = await fetch(childrenUrl(fdPath), { method: 'POST', headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) });
+    if (!r.ok && r.status !== 409) throw await graphError(r); // 409: it already exists, so just open it
+    $('#fdNewName').value = ''; browse(`${fdPath}/${name}`);
+  } catch (e) { toast(e.status === 404 ? 'Choose an existing folder first, then create the new one inside it.' : e.message, 5000); }
+};
+
 // ---------- wiring ----------
 // ---------- paste an emailed receipt ----------
 const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
 const CURRENCIES = ['USD','CAD','EUR','GBP','AUD','NZD','CHF','JPY','MXN','SEK','NOK','DKK','SGD','HKD','INR'];
 
-// Pull the total, date and vendor out of the receipt text. Only fills fields the user hasn't typed in.
+const SYMBOLS = { 'US$': 'USD', 'CA$': 'CAD', 'C$': 'CAD', 'AU$': 'AUD', 'A$': 'AUD', 'NZ$': 'NZD', 'HK$': 'HKD', 'S$': 'SGD', 'MX$': 'MXN', '€': 'EUR', '£': 'GBP', '¥': 'JPY', '₹': 'INR' };
+const VENDORS = [[/uber\s*eats/i, 'Uber Eats'], [/\buber\b/i, 'Uber ride'], [/\blyft\b/i, 'Lyft ride'], [/\bdoordash\b/i, 'DoorDash'], [/\bgrubhub\b/i, 'Grubhub'],
+  [/\bairbnb\b/i, 'Airbnb'], [/\bamtrak\b/i, 'Amtrak'], [/\bdelta air/i, 'Delta'], [/\bunited airlines\b/i, 'United Airlines'], [/\bamerican airlines\b/i, 'American Airlines'],
+  [/\bsouthwest airlines\b/i, 'Southwest'], [/\bmarriott\b/i, 'Marriott'], [/\bhilton\b/i, 'Hilton'], [/\bhyatt\b/i, 'Hyatt'], [/\bstarbucks\b/i, 'Starbucks']];
+const MONEY = String.raw`(US\$|CA\$|C\$|AU\$|A\$|NZ\$|HK\$|S\$|MX\$|\$|€|£|¥|₹|[A-Z]{3})?\s?(\d{1,3}(?:[,.]\d{3})+(?:[.,]\d{2})?|\d+[.,]\d{2})(?:\s?([A-Z]{3})\b)?`;
+const TOTAL_RE = new RegExp(String.raw`\b(?:grand total|total charged|total paid|amount paid|amount charged|total amount|you paid|total)\b[^0-9$€£¥₹]{0,30}?` + MONEY, 'i');
+const MON = '(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?';
+
+// "1,234.56" or "1.234,56" -> "1234.56"
+function normAmount(s) { const m = s.match(/^(.*)[.,](\d{2})$/); return m ? m[1].replace(/[.,]/g, '') + '.' + m[2] : s.replace(/[.,]/g, ''); }
+
+function findDate(t) {
+  const iso = (y, m, d) => (m >= 1 && m <= 12 && d >= 1 && d <= 31) ? `${y}-${pad(m)}-${pad(d)}` : null;
+  const mon = s => MONTHS.indexOf(s.toLowerCase().slice(0, 3)) + 1;
+  const found = [];
+  const scan = (re, make) => { for (const m of t.matchAll(re)) { const v = make(m); if (v) found.push([m.index, v]); } };
+  scan(new RegExp(`\\b${MON} (\\d{1,2})(?:st|nd|rd|th)?,? (20\\d\\d)\\b`, 'gi'), m => iso(m[3], mon(m[1]), +m[2]));
+  scan(new RegExp(`\\b(\\d{1,2}) ${MON},? (20\\d\\d)\\b`, 'gi'), m => iso(m[3], mon(m[2]), +m[1]));
+  scan(/\b(20\d\d)-(\d{2})-(\d{2})\b/g, m => iso(m[1], +m[2], +m[3]));
+  scan(/\b(\d{1,2})\/(\d{1,2})\/(20\d\d)\b/g, m => +m[1] > 12 ? iso(m[3], +m[2], +m[1]) : iso(m[3], +m[1], +m[2]));
+  if (!found.length) { // no year, e.g. "Tue, Oct 19": assume the most recent such date
+    scan(new RegExp(`\\b${MON} (\\d{1,2})\\b`, 'gi'), m => {
+      const now = new Date(); let y = now.getFullYear();
+      if (new Date(y, mon(m[1]) - 1, +m[2]) > now) y--;
+      return iso(y, mon(m[1]), +m[2]);
+    });
+  }
+  found.sort((a, b) => a[0] - b[0]);
+  return found[0]?.[1] || null;
+}
+
+// Fill the date, vendor and total from the receipt text. Values on the receipt replace what's in the form.
 function guessFields(text) {
-  const t = text.replace(/\s+/g, ' ');
-  const total = t.match(/\b(?:grand total|total charged|amount charged|you paid|total)\b[^0-9$€£]{0,25}?(\$|€|£|[A-Z]{3})?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+[.,]\d{2})/i);
-  if (total && !$('#fAmount').value) {
-    $('#fAmount').value = total[2].replace(/,(?=\d{3}(\D|$))/g, '');
-    const cur = { '€': 'EUR', '£': 'GBP' }[total[1]] || (CURRENCIES.includes(total[1]) ? total[1] : '');
-    if (cur) $('#fCurrency').value = cur;
+  const t = text.replace(/\s+/g, ' '), got = [];
+  const total = t.match(TOTAL_RE);
+  if (total) {
+    $('#fAmount').value = normAmount(total[2]);
+    const code = [total[1], total[3]].map(c => SYMBOLS[c] || (c && CURRENCIES.includes(c.toUpperCase()) ? c.toUpperCase() : '')).find(Boolean);
+    $('#fCurrency').value = code || (total[1] === '$' ? settings.currency || 'USD' : $('#fCurrency').value); // a bare $ means your usual currency
+    got.push(`${total[1] || ''}${total[2]}${total[3] ? ' ' + total[3] : ''}`);
   }
-  const d = t.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (\d{1,2}),? (20\d\d)\b/i)
-    || t.match(/\b(\d{1,2}) (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (20\d\d)\b/i);
-  if (d && $('#fDate').value === today()) {
-    const [mon, day] = isNaN(d[1]) ? [d[1], d[2]] : [d[2], d[1]];
-    $('#fDate').value = `${d[3]}-${pad(MONTHS.indexOf(mon.toLowerCase().slice(0, 3)) + 1)}-${pad(day)}`;
-  }
-  if (!$('#fVendor').value) {
-    const v = /uber\s*eats/i.test(t) ? 'Uber Eats' : /\buber\b/i.test(t) ? 'Uber ride' : /\blyft\b/i.test(t) ? 'Lyft ride' : '';
-    if (v) $('#fVendor').value = v;
-  }
+  const date = findDate(t);
+  if (date) { $('#fDate').value = date; got.push(date); }
+  const thanks = t.match(/[Tt]hank(?:s| you) for (?:choosing|shopping (?:with|at)|staying (?:with|at)|flying(?: with)?|dining (?:with|at)|your (?:order|purchase|stay) (?:from|at|with)) ([A-Z][\w&'’.-]*(?: [A-Z][\w&'’.-]*){0,3})/);
+  const vendor = VENDORS.find(([re]) => re.test(t))?.[1] || thanks?.[1];
+  if (vendor) { $('#fVendor').value = vendor; got.push(vendor); }
   updatePreview();
+  return { got, total: !!total };
 }
 
 function cleanHtml(html) {
@@ -614,8 +761,8 @@ async function addPasted({ html, text }) {
       ctx.drawImage(canvas, 0, top, canvas.width, bottom - top, 0, 0, canvas.width, bottom - top);
       const p = { src: c, rot: 0, mode: 'color' }; render(p); pages.push(p);
     }
-    guessFields(stage.innerText || text || '');
-    toast('Receipt added. Check the amount and description before saving.', 4500);
+    const g = guessFields(stage.innerText || text || '');
+    toast(g.total ? `Receipt added: ${g.got.join(' · ')}. Check it before saving.` : "Receipt added, but I couldn't find the total. Type the amount in.", 5000);
   } catch (e) { toast('Could not turn that into a page: ' + e.message, 6000); }
   stage.replaceChildren(); stage.style.width = ''; busy(false); drawTray();
 }
@@ -664,7 +811,10 @@ $('#fDate').value = today();
 $('#fCurrency').value = settings.currency || '';
 try { $('#fTrip').value = localStorage.getItem('rd.trip') || ''; } catch {}
 updatePreview(); drawTray();
-initMsal().then(flushOutbox);
+Promise.all([restoreDraft().catch(() => null), initMsal()]).then(([d]) => {
+  flushOutbox();
+  if (d?.reopen === 'folder' && signedIn()) $('#btnFolder').click();
+});
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
