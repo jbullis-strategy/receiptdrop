@@ -186,7 +186,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
 
 <dialog id="settings">
   <form class="dlg" method="dialog" id="settingsForm">
-    <h3>Settings</h3>
+    <h3>Settings <span class="hint" style="font-weight:400">· version 2026-11-04</span></h3>
 
     <div class="field"><span>Save receipts in this OneDrive folder</span><div class="pickrow"><input id="sBase" class="mono" placeholder="(top level of OneDrive)" aria-label="OneDrive folder"><button type="button" id="sBrowse">Browse…</button></div></div>
     <label class="field"><span>Subfolders inside it ({YYYY}, {MM}, {trip}; leave empty for none)</span><input id="sSub" class="mono"></label>
@@ -664,7 +664,12 @@ const VENDORS = [[/uber\s*eats/i, 'Uber Eats'], [/\buber\b/i, 'Uber ride'], [/\b
   [/\bairbnb\b/i, 'Airbnb'], [/\bamtrak\b/i, 'Amtrak'], [/\bdelta air/i, 'Delta'], [/\bunited airlines\b/i, 'United Airlines'], [/\bamerican airlines\b/i, 'American Airlines'],
   [/\bsouthwest airlines\b/i, 'Southwest'], [/\bmarriott\b/i, 'Marriott'], [/\bhilton\b/i, 'Hilton'], [/\bhyatt\b/i, 'Hyatt'], [/\bstarbucks\b/i, 'Starbucks']];
 const MONEY = String.raw`(US\$|CA\$|C\$|AU\$|A\$|NZ\$|HK\$|S\$|MX\$|\$|€|£|¥|₹|[A-Z]{3})?\s?(\d{1,3}(?:[,.]\d{3})+(?:[.,]\d{2})?|\d+[.,]\d{2})(?:\s?([A-Z]{3})\b)?`;
-const TOTAL_RE = new RegExp(String.raw`\b(?:grand total|total charged|total paid|amount paid|amount charged|total amount|you paid|total)\b[^0-9$€£¥₹]{0,30}?` + MONEY, 'i');
+const MONEY_ALL = new RegExp(MONEY, 'g');
+const TOTAL_WORDS = /\b(?:grand total|order total|total charged|total paid|amount paid|amount charged|total amount|amount due|balance due|you paid|charged|total)\b[^0-9$€£¥₹]{0,30}$/i;
+const PAID_WITH = /(?:visa|mastercard|master card|amex|american express|discover|apple pay|google pay|paypal|venmo|card ending|ending in|[•*]{2,})[^0-9$€£¥₹]{0,30}$/i;
+// Sender domains that say nothing about the vendor (social links, mail and tracking services).
+const GENERIC_DOMAINS = /^(google|apple|facebook|fb|twitter|x|instagram|linkedin|youtube|youtu|tiktok|pinterest|snapchat|whatsapp|outlook|office|office365|live|microsoft|hotmail|gmail|yahoo|icloud|sendgrid|mailchimp|list-manage|mcusercontent|mailgun|mandrillapp|sparkpost|sparkpostmail|exacttarget|salesforce|sfmc-content|braze|iterable|hubspot|hs-sites|zendesk|amazonaws|cloudfront|akamaihd|akamai|doubleclick|gstatic|googleusercontent|googleapis|w3|schema|imgix|cloudinary|bit|ow|tinyurl|appsflyer|onelink|app|branch|adjust|trustpilot|surveymonkey|typeform|apps|play|itunes|safelinks|protection|email|mail|e|click|links|link|t|go|info|news|cdn|static|images|img)$/i;
+const NAMES = { mcdonalds: "McDonald's", doordash: 'DoorDash', ubereats: 'Uber Eats', uber: 'Uber ride', lyft: 'Lyft ride', airbnb: 'Airbnb', grubhub: 'Grubhub', starbucks: 'Starbucks', delta: 'Delta', united: 'United Airlines', aa: 'American Airlines', southwest: 'Southwest', jetblue: 'JetBlue', marriott: 'Marriott', hilton: 'Hilton', hyatt: 'Hyatt', ihg: 'IHG', amtrak: 'Amtrak', chipotle: 'Chipotle', expedia: 'Expedia', booking: 'Booking.com', hertz: 'Hertz', avis: 'Avis', enterprise: 'Enterprise' };
 const MON = '(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?';
 
 // "1,234.56" or "1.234,56" -> "1234.56"
@@ -690,23 +695,89 @@ function findDate(t) {
   return found[0]?.[1] || null;
 }
 
-// Fill the date, vendor and total from the receipt text. Values on the receipt replace what's in the form.
-function guessFields(text) {
-  const t = text.replace(/\s+/g, ' '), got = [];
-  const total = t.match(TOTAL_RE);
+// Every amount in the text that is clearly money: it has a currency mark or code, or cents.
+function moneyIn(t) {
+  const out = [];
+  for (const m of t.matchAll(MONEY_ALL)) {
+    const code = [m[1], m[3]].map(c => SYMBOLS[c] || (c && CURRENCIES.includes(c.toUpperCase()) ? c.toUpperCase() : '')).find(Boolean) || '';
+    const marked = !!code || m[1] === '$';
+    if (!marked && !/[.,]\d{2}$/.test(m[2])) continue;
+    out.push({ index: m.index, text: m[0].trim(), amount: normAmount(m[2]), value: parseFloat(normAmount(m[2])), code, dollar: m[1] === '$', marked });
+  }
+  return out;
+}
+
+// Pick the total: a labelled total first, then the amount charged to a card, then the largest amount.
+function findTotal(t) {
+  const all = moneyIn(t).filter(m => m.value > 0);
+  const before = m => t.slice(Math.max(0, m.index - 45), m.index);
+  return all.find(m => TOTAL_WORDS.test(before(m)) && !/sub\s*-?\s*total[^0-9]{0,30}$/i.test(before(m)))
+    || all.find(m => PAID_WITH.test(before(m)))
+    || all.filter(m => m.marked).sort((a, b) => b.value - a.value)[0]
+    || null;
+}
+
+function tidyName(s) { // "McDonald's Corporation. All rights reserved" -> "McDonald's"
+  s = s.split(/\.(?:\s|$)|\s+all\s+rights|\s+\|/i)[0];
+  for (let prev; prev !== s;) { prev = s; s = s.replace(/\s*,?\s*\b(inc|llc|ltd|limited|corp|corporation|co|company|technologies|plc|gmbh|usa|us)\b\.?\s*$/i, '').replace(/[,.\s]+$/, '').trim(); }
+  return s;
+}
+function nameFor(raw, t) {
+  const key = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (key.startsWith('uber')) return /uber\s*eats/i.test(t) ? 'Uber Eats' : 'Uber ride';
+  return NAMES[key] || VENDORS.find(([re]) => re.test(raw))?.[1] || raw;
+}
+
+// The most frequent sender domain among the email's links and images, e.g. lyft.com -> Lyft.
+function domainVendor(html) {
+  if (!html) return null;
+  const doc = new DOMParser().parseFromString(html, 'text/html'), counts = {};
+  for (const el of doc.querySelectorAll('a[href], img[src]')) {
+    let u = el.getAttribute('href') || el.getAttribute('src');
+    try {
+      u = new URL(u);
+      const inner = u.searchParams.get('url') || u.searchParams.get('u'); // Outlook Safe Links and similar wrappers
+      if (inner && /^https?:/i.test(inner)) u = new URL(inner);
+    } catch { continue; }
+    if (!/^https?:$/.test(u.protocol)) continue;
+    const parts = u.hostname.toLowerCase().split('.');
+    if (parts.length < 2) continue;
+    let name = parts[parts.length - 2];
+    if (name.length <= 3 && parts.length > 2 && /^(co|com|org|net|ac|gov)$/.test(name)) name = parts[parts.length - 3]; // e.g. example.co.uk
+    if (GENERIC_DOMAINS.test(name)) continue;
+    counts[name] = (counts[name] || 0) + 1;
+  }
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return best ? best[0].charAt(0).toUpperCase() + best[0].slice(1) : null;
+}
+
+function findVendor(t, html, lines = t) {
+  const copyright = lines.match(/(?:©|\(c\)|copyright)\s*(?:20\d\d\s*[-–]?\s*(?:20\d\d)?\s*)?([A-Z][\w'’&.-]*(?: [A-Z][\w'’&.-]*){0,3})/);
+  const thanks = lines.match(/[Tt]hank(?:s| you) for (?:choosing|shopping (?:with|at)|staying (?:with|at)|flying(?: with)?|dining (?:with|at)|riding with|ordering (?:from|with)|your (?:order|purchase|stay) (?:from|at|with)) ([A-Z][\w&'’.-]*(?: [A-Z][\w&'’.-]*){0,3})/);
+  const known = VENDORS.find(([re]) => re.test(t));
+  const alt = html && [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('img[alt]')].map(i => i.alt.trim()).find(a => a && a.length < 30 && !/logo|icon|spacer|image|banner|pixel/i.test(a));
+  for (const raw of [copyright?.[1] && tidyName(copyright[1]), domainVendor(html), known?.[1], thanks?.[1] && tidyName(thanks[1]), alt]) {
+    if (raw && raw.length > 1 && !/^(all|the|this|your)$/i.test(raw)) return nameFor(raw, t);
+  }
+  return null;
+}
+
+// Fill the date, vendor and total from the receipt. Values on the receipt replace what's in the form.
+function guessFields(text, html = '') {
+  const clean = text.replace(/[\u200b-\u200d\u2060\ufeff\u00ad\u034f]/g, ''); // invisible spacer characters used in marketing emails
+  const t = clean.replace(/\s+/g, ' '), lines = clean.replace(/[^\S\n]+/g, ' '), got = []; // lines keeps line breaks so names stop at the end of a line
+  const total = findTotal(t);
   if (total) {
-    $('#fAmount').value = normAmount(total[2]);
-    const code = [total[1], total[3]].map(c => SYMBOLS[c] || (c && CURRENCIES.includes(c.toUpperCase()) ? c.toUpperCase() : '')).find(Boolean);
-    $('#fCurrency').value = code || (total[1] === '$' ? settings.currency || 'USD' : $('#fCurrency').value); // a bare $ means your usual currency
-    got.push(`${total[1] || ''}${total[2]}${total[3] ? ' ' + total[3] : ''}`);
+    $('#fAmount').value = total.amount;
+    $('#fCurrency').value = total.code || (total.dollar ? settings.currency || 'USD' : $('#fCurrency').value); // a bare $ means your usual currency
+    got.push(total.text);
   }
   const date = findDate(t);
   if (date) { $('#fDate').value = date; got.push(date); }
-  const thanks = t.match(/[Tt]hank(?:s| you) for (?:choosing|shopping (?:with|at)|staying (?:with|at)|flying(?: with)?|dining (?:with|at)|your (?:order|purchase|stay) (?:from|at|with)) ([A-Z][\w&'’.-]*(?: [A-Z][\w&'’.-]*){0,3})/);
-  const vendor = VENDORS.find(([re]) => re.test(t))?.[1] || thanks?.[1];
+  const vendor = findVendor(t, html, lines);
   if (vendor) { $('#fVendor').value = vendor; got.push(vendor); }
   updatePreview();
-  return { got, total: !!total };
+  return { got, total: !!total, vendor: !!vendor };
 }
 
 function cleanHtml(html) {
@@ -743,6 +814,8 @@ async function addPasted({ html, text }) {
   try {
     if (html) stage.innerHTML = cleanHtml(html);
     else { const pre = document.createElement('pre'); pre.textContent = text; stage.replaceChildren(pre); }
+    const g = guessFields([stage.innerText, text, stage.textContent].filter(Boolean).join('\n'), html);
+    toast(g.total ? `Found ${g.got.join(' · ')}. Check it before saving.` : "Receipt added, but I couldn't find the total. Type the amount in.", 6000);
     await Promise.all([...stage.querySelectorAll('img')].map(img => img.complete ? 0 : new Promise(r => { img.onload = img.onerror = r; setTimeout(r, 4000); })));
     // Widen the canvas to fit emails laid out wider than 600px, so nothing is cropped on the right.
     const w = Math.min(1400, Math.max(600, stage.scrollWidth + 32)); // + side padding, which scrollWidth leaves out when content overflows
@@ -761,8 +834,6 @@ async function addPasted({ html, text }) {
       ctx.drawImage(canvas, 0, top, canvas.width, bottom - top, 0, 0, canvas.width, bottom - top);
       const p = { src: c, rot: 0, mode: 'color' }; render(p); pages.push(p);
     }
-    const g = guessFields(stage.innerText || text || '');
-    toast(g.total ? `Receipt added: ${g.got.join(' · ')}. Check it before saving.` : "Receipt added, but I couldn't find the total. Type the amount in.", 5000);
   } catch (e) { toast('Could not turn that into a page: ' + e.message, 6000); }
   stage.replaceChildren(); stage.style.width = ''; busy(false); drawTray();
 }
