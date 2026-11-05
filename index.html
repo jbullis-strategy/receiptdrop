@@ -121,7 +121,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
     <div class="capture">
       <label for="cam">Scan receipt<input id="cam" type="file" accept="image/*" capture="environment"></label>
       <label for="lib" class="secondary">From photos<input id="lib" type="file" accept="image/*" multiple></label>
-      <button type="button" id="btnPaste" class="secondary">Paste email</button>
+      <button type="button" id="btnPaste" class="secondary">Paste clipboard</button>
     </div>
   </section>
 
@@ -166,7 +166,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
 
 <dialog id="pasteDlg">
   <div class="dlg">
-    <h3>Paste an emailed receipt</h3>
+    <h3>Paste from clipboard</h3>
     <p class="hint">In your email app, open the receipt, choose Select All, and copy. Then tap and hold the box below and choose Paste. On a computer, click the box and press Ctrl+V.</p>
     <div id="pasteBox" class="pastebox" contenteditable="true" role="textbox" aria-label="Paste the receipt here"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" id="pasteCancel">Cancel</button></div>
@@ -189,7 +189,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
 
 <dialog id="settings">
   <form class="dlg" method="dialog" id="settingsForm">
-    <h3>Settings <span class="hint" style="font-weight:400">· version 2026-11-05</span></h3>
+    <h3>Settings <span class="hint" style="font-weight:400">· version 2026-11-05b</span></h3>
 
     <div class="field"><span>Save receipts in this OneDrive folder</span><div class="pickrow"><input id="sBase" class="mono" placeholder="(top level of OneDrive)" aria-label="OneDrive folder"><button type="button" id="sBrowse">Browse…</button></div></div>
     <label class="field"><span>Subfolders inside it ({YYYY}, {MM}, {trip}; leave empty for none)</span><input id="sSub" class="mono"></label>
