@@ -1,5 +1,5 @@
 // Caches the app shell so the scanner opens without a connection. Microsoft sign-in and upload calls always go to the network.
-const CACHE = 'receipt-drop-v5';
+const CACHE = 'receipt-drop-v6';
 const SHELL = ['./', 'index.html', 'manifest.json', 'icon.svg', 'icon-192.png',
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',

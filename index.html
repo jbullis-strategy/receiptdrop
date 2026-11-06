@@ -189,7 +189,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding
 
 <dialog id="settings">
   <form class="dlg" method="dialog" id="settingsForm">
-    <h3>Settings <span class="hint" style="font-weight:400">· version 2026-11-05b</span></h3>
+    <h3>Settings <span class="hint" style="font-weight:400">· version 2026-11-06</span></h3>
 
     <div class="field"><span>Save receipts in this OneDrive folder</span><div class="pickrow"><input id="sBase" class="mono" placeholder="(top level of OneDrive)" aria-label="OneDrive folder"><button type="button" id="sBrowse">Browse…</button></div></div>
     <label class="field"><span>Subfolders inside it ({YYYY}, {MM}, {trip}; leave empty for none)</span><input id="sSub" class="mono"></label>
@@ -488,8 +488,10 @@ async function drawLists() {
 
 // ---------- OneDrive via Microsoft Graph ----------
 let msalApp = null;
+let authOk = null; // true: sign-in works; false: Microsoft needs the user to sign in again; null: not checked yet (or offline)
+let signInFailed = false; // the user came back from Microsoft's page without signing in
 async function initMsal() {
-  msalApp = null;
+  msalApp = null; authOk = null;
   if (!settings.clientId || !window.msal) return updateStatus();
   try {
     msalApp = new msal.PublicClientApplication({
@@ -497,19 +499,19 @@ async function initMsal() {
       cache: { cacheLocation: 'localStorage' }
     });
     const r = await msalApp.handleRedirectPromise();
-    if (r?.account) { msalApp.setActiveAccount(r.account); toast('OneDrive connected.'); }
+    if (r?.account) { msalApp.setActiveAccount(r.account); authOk = true; toast('Signed in to OneDrive.'); }
     if (!msalApp.getActiveAccount() && msalApp.getAllAccounts()[0]) msalApp.setActiveAccount(msalApp.getAllAccounts()[0]);
-  } catch (e) { toast('Sign-in problem: ' + e.message, 6000); }
+  } catch (e) { signInFailed = true; toast(/cancel/i.test(e.errorCode || e.message) ? 'Sign-in was cancelled. Tap "Sign in" at the top when you are ready.' : 'Sign-in problem: ' + e.message, 6000); }
   updateStatus();
 }
-const signedIn = () => !!msalApp?.getActiveAccount();
+const signedIn = () => !!msalApp?.getActiveAccount() && authOk !== false;
 // Sends the user to Microsoft's sign-in page. Whatever is on screen is kept and restored when they come back.
 async function signIn(extra) {
   if (!msalApp) await initMsal();
   if (!msalApp) { toast('Add your Application (client) ID in Settings first.'); return openSettings(true); }
   try { await saveDraft(extra); } catch {}
   busy(true, 'Opening Microsoft sign-in…');
-  try { await msalApp.loginRedirect({ scopes: SCOPES, redirectUri: REDIRECT }); }
+  try { await msalApp.loginRedirect({ scopes: SCOPES, redirectUri: REDIRECT, loginHint: msalApp.getActiveAccount()?.username }); }
   catch (e) { busy(false); toast('Sign-in problem: ' + e.message, 6000); }
 }
 function updateStatus() {
@@ -517,13 +519,32 @@ function updateStatus() {
   if (signedIn()) { s.className = 'chip on'; s.textContent = 'OneDrive ✓'; s.title = msalApp.getActiveAccount().username; }
   else { s.className = 'chip off'; s.textContent = 'Sign in'; s.title = 'Sign in to OneDrive'; }
 }
+// Never opens a popup (phones block them): when Microsoft wants the user to sign in again, callers send them to the sign-in page.
+const needSignIn = () => Object.assign(new Error('Your OneDrive sign-in has expired. Sign in again to finish saving.'), { needsSignIn: true });
 async function getToken() {
-  const account = msalApp.getActiveAccount();
-  try { return (await msalApp.acquireTokenSilent({ scopes: SCOPES, account })).accessToken; }
+  const account = msalApp?.getActiveAccount();
+  if (!account) throw needSignIn();
+  try { const r = await msalApp.acquireTokenSilent({ scopes: SCOPES, account }); authOk = true; return r.accessToken; }
   catch (e) {
-    if (e instanceof msal.InteractionRequiredAuthError) return (await msalApp.acquireTokenPopup({ scopes: SCOPES, account })).accessToken;
+    if (e instanceof msal.InteractionRequiredAuthError || /interaction_required|login_required|consent_required|no_tokens_found|invalid_grant|token_renewal/i.test(`${e.errorCode} ${e.message}`)) {
+      authOk = false; updateStatus(); throw needSignIn();
+    }
     throw e;
   }
+}
+// true if sign-in works, false if the user must sign in, null if it can't be checked right now (e.g. offline).
+async function checkAuth() {
+  if (!msalApp?.getActiveAccount()) return false;
+  try { await getToken(); return true; } catch (e) { return e.needsSignIn ? false : null; }
+}
+const mustSignIn = () => !!settings.clientId && navigator.onLine && (!msalApp?.getActiveAccount() || authOk === false);
+// Before Scan, From photos or Paste clipboard: go to the sign-in page first if needed. Offline, let the user keep working.
+function signInFirst(e) {
+  if (!mustSignIn()) return false;
+  e?.preventDefault();
+  toast('Sign in to OneDrive first. You will come right back here.', 4000);
+  signIn();
+  return true;
 }
 const encPath = p => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
 async function graphError(r) { let m = `${r.status}`; try { m = (await r.json()).error?.message || m; } catch {} return Object.assign(new Error('OneDrive said: ' + m), { status: r.status }); }
@@ -548,9 +569,11 @@ async function upload(blob, folder, name) {
 }
 
 let flushing = false;
-async function flushOutbox() {
+// interactive: the user just tapped Save, so it's fine to go to the sign-in page if Microsoft asks for it.
+async function flushOutbox(interactive = false) {
   if (flushing || !signedIn() || !navigator.onLine) return drawLists();
   flushing = true;
+  let wantSignIn = false;
   try {
     for (const it of await outboxAll()) {
       try {
@@ -559,11 +582,13 @@ async function flushOutbox() {
         addRecent({ name: res.name || it.name, folder: it.folder, url: res.webUrl, at: Date.now() });
         toast(`Saved to OneDrive: ${it.folder}/${res.name || it.name}`);
       } catch (e) {
+        if (e.needsSignIn) { wantSignIn = true; break; } // keep it waiting; it uploads after sign-in
         if (!navigator.onLine || e instanceof TypeError) break; // network dropped; try again later
         it.error = e.message; await outboxPut(it);
       }
     }
   } finally { flushing = false; drawLists(); }
+  if (wantSignIn) { busy(false); if (interactive) signIn(); else toast('Your OneDrive sign-in has expired. Tap "Sign in" at the top to upload waiting receipts.', 6000); }
 }
 
 // ---------- actions ----------
@@ -581,7 +606,7 @@ $('#btnSave').onclick = async () => {
   // Not signed in yet: the receipt waits in the Outbox and uploads as soon as sign-in finishes.
   if (!signedIn()) return signIn();
   if (!navigator.onLine) toast('You are offline. The receipt is queued and will upload when you reconnect.', 5000);
-  busy(navigator.onLine, 'Uploading…'); await flushOutbox(); busy(false);
+  busy(navigator.onLine, 'Uploading…'); await flushOutbox(true); busy(false);
 };
 
 function saveLocal(blob, name) {
@@ -668,6 +693,7 @@ async function browse(path) {
     }
   } catch (e) {
     if (seq !== fdSeq) return;
+    if (e.needsSignIn) return browse(fdPath); // shows the sign-in button
     const msg = e.status === 404 ? "This folder doesn't exist yet. It will be created the first time you save a receipt." : e.message;
     list.replaceChildren(Object.assign(document.createElement('div'), { className: 'empty', textContent: msg }));
   }
@@ -897,6 +923,7 @@ function fromClipboardEvent(e) {
 }
 
 $('#btnPaste').onclick = async () => {
+  if (signInFirst()) return;
   // Read the clipboard directly where the browser allows it; otherwise show a box to paste into.
   try {
     const items = await Promise.race([navigator.clipboard.read(), new Promise((_, no) => setTimeout(no, 5000))]);
@@ -930,7 +957,17 @@ $('#fDate').value = today();
 $('#fCurrency').value = settings.currency || '';
 try { $('#fTrip').value = localStorage.getItem('rd.trip') || ''; } catch {}
 updatePreview(); drawTray();
-Promise.all([restoreDraft().catch(() => null), initMsal()]).then(([d]) => {
+for (const id of ['cam', 'lib']) document.querySelector(`label[for="${id}"]`).addEventListener('click', signInFirst);
+
+// On opening: check the sign-in still works. If not, go to Microsoft's sign-in page (once per visit, so it can't loop).
+Promise.all([restoreDraft().catch(() => null), initMsal()]).then(async ([d]) => {
+  if (msalApp && authOk === null) authOk = await checkAuth();
+  updateStatus(); drawLists();
+  let tried = false; try { tried = sessionStorage.getItem('rd.autoSignIn') === '1'; } catch {}
+  if (mustSignIn() && !signInFailed && !tried) {
+    try { sessionStorage.setItem('rd.autoSignIn', '1'); } catch {}
+    return signIn(d?.reopen ? { reopen: d.reopen } : undefined);
+  }
   flushOutbox();
   if (d?.reopen === 'folder' && signedIn()) $('#btnFolder').click();
 });
